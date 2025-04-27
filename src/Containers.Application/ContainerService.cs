@@ -4,7 +4,7 @@ using Microsoft.Data.SqlClient;
 
 namespace Containers.Application;
 
-public class ContainerService
+public class ContainerService : IContainerService
 {
     private string _connectionString;
 
@@ -49,4 +49,23 @@ public class ContainerService
         }
         return containers;
     }
+
+    public bool AddContainer(Container container)
+    {
+        const string insertString = "INSERT INTO Containers (ContainerTypeId, IsHasrdious, Name) Values (@ContainerTypeId, @IsHasrdious, @Name)";
+        
+        int countRowsAdded = -1;
+        using (SqlConnection connection = new SqlConnection(_connectionString))
+        {
+            SqlCommand command = new SqlCommand(insertString, connection);
+            command.Parameters.AddWithValue("@ContainerTypeId", container.ContainerTypeID);
+            command.Parameters.AddWithValue("@IsHasrdious", container.isHazardious);
+            command.Parameters.AddWithValue("@Name", container.Name);
+            
+            connection.Open();
+            countRowsAdded = command.ExecuteNonQuery();
+        }
+        return countRowsAdded != -1;
+    }
+    
 }
