@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Containers.Application", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Containers.API", "src\Containers.API\Containers.API.csproj", "{EA510D51-E1F4-4600-8AF5-5F0621778756}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Devices.Persistence", "Devices.Persistence\Devices.Persistence.csproj", "{80D73DA0-BCA6-40C4-AB99-2BC90AAAE1F0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{EA510D51-E1F4-4600-8AF5-5F0621778756}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EA510D51-E1F4-4600-8AF5-5F0621778756}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EA510D51-E1F4-4600-8AF5-5F0621778756}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80D73DA0-BCA6-40C4-AB99-2BC90AAAE1F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80D73DA0-BCA6-40C4-AB99-2BC90AAAE1F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80D73DA0-BCA6-40C4-AB99-2BC90AAAE1F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80D73DA0-BCA6-40C4-AB99-2BC90AAAE1F0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

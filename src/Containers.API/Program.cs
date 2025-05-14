@@ -1,21 +1,23 @@
 
+using System.Data;
 using Containers.Application;
 using Containers.Models;
+using Devices.Application;
+using Devices.Persistence.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-builder.Services.AddSingleton<IContainerService, ContainerService>(containerService => new ContainerService(connectionString));
-builder.Services.AddScoped<IDeviceService>(provider =>
-    new DeviceService(connectionString ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.")));
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+
+builder.Services.AddScoped<IDeviceRepository, DeviceRepository>();
+
+builder.Services.AddScoped<IDeviceService, DeviceService>();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -24,106 +26,65 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapPut("api/devices/{id:int}", async (int id, UpdateDeviceRequest request, IDeviceService deviceService) =>
+app.MapPut("api/devices/{id}", async (string id, UpdateDeviceRequest request, IDeviceService deviceService) =>
 {
+    
+    if (request.RowVersion == null)
+    {
+        return Results.BadRequest(new { message = "RowVersion is required for updates." });
+    }
+
     try
     {
         var success = await deviceService.UpdateDeviceAsync(id, request);
-
         if (success)
         {
-            return Results.Ok();
+            return Results.NoContent(); 
         }
         else
         {
-            return Results.NotFound();
+            
+            return Results.NotFound(new { message = $"Device with ID '{id}' not found." });
         }
+    }
+    catch (DBConcurrencyException)
+    {
+        
+        return Results.Conflict(new { message = "Update conflict. The device has been modified by another user. Please refresh and try again." }); // 409
+    }
+    catch (ArgumentException argEx)
+    {
+        return Results.BadRequest(new { message = argEx.Message });
     }
     catch (Exception e)
     {
-        return Results.Problem(e.Message);
+        Console.WriteLine($"Unhandled error on PUT /api/devices/{id}: {e.Message}");
+        return Results.Problem("An unexpected error occurred while updating the device.");
     }
 });
 
 
 app.MapPost("api/devices", async (CreateDeviceRequest request, IDeviceService deviceService) =>
     {
-        try 
-        {
-            List<string> validationErrors = new(); 
-            
-            string normalizedDeviceType = request.DeviceType?.Trim().ToLowerInvariant() ?? string.Empty;
-            if (!new[] { "personalcomputer", "embedded", "smartwatch" }.Contains(normalizedDeviceType))
-            {
-                validationErrors.Add($"Invalid DeviceType '{request.DeviceType}'. Must be 'PersonalComputer', 'Embedded', or 'Smartwatch'.");
-            }
-            else
-            {
-                
-                if (normalizedDeviceType == "embedded")
-                {
-                    
-                    if (!string.IsNullOrWhiteSpace(request.IpAddress) && !System.Net.IPAddress.TryParse(request.IpAddress, out _))
-                    {
-                        validationErrors.Add("Invalid IP address format for Embedded device.");
-                    }
-                    
-                    if (string.IsNullOrWhiteSpace(request.NetworkName))
-                    {
-                        validationErrors.Add("NetworkName is required for Embedded device.");
-                    }
-                }
-                
-                else if (normalizedDeviceType == "smartwatch")
-                {
-                    
-                    if (request.BatteryPercentage.HasValue && (request.BatteryPercentage < 0 || request.BatteryPercentage > 100))
-                    {
-                        validationErrors.Add("BatteryPercentage must be between 0 and 100 for Smartwatch.");
-                    }
-                    
-                    if (!request.BatteryPercentage.HasValue)
-                    {
-                         validationErrors.Add("BatteryPercentage is required for Smartwatch.");
-                    }
-                }
-                 
-                else if (normalizedDeviceType == "personalcomputer")
-                {
-                     if (string.IsNullOrWhiteSpace(request.OperationSystem))
-                     {
-                          validationErrors.Add("OperationSystem is required for PersonalComputer.");
-                     }
-                }
-            }
-
-            
-            if (validationErrors.Any())
-            {
-                
-                return Results.BadRequest(string.Join(" ", validationErrors));
-                
-            }
-           
-
-
-            
-            var createdDevice = await deviceService.CreateDeviceAsync(request);
-
-            if (createdDevice is not null)
-            {
-                return Results.CreatedAtRoute("GetDeviceById", new { id = createdDevice.Id }, createdDevice);
-            }
-            else
-            {
-                
-                return Results.BadRequest("Failed to create device. Internal service issue?");
-            }
-        }
         
-        catch (Exception e) 
+        try
         {
-            return Results.Problem(e.Message);
+            var createdDeviceDetails = await deviceService.CreateDeviceAsync(request);
+            if (createdDeviceDetails != null)
+            {
+                return Results.CreatedAtRoute("GetDeviceById", new { id = createdDeviceDetails.Id }, createdDeviceDetails);
+            }
+            
+            return Results.Conflict(new { message = "Device with the proposed ID might already exist or another creation error occurred." });
+        }
+        catch (ArgumentException argEx)
+        {
+            return Results.BadRequest(new { message = argEx.Message });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Unhandled error on POST /api/devices: {e.Message}");
+            return Results.Problem("An unexpected error occurred while creating the device.");
         }
     })
     .WithName("CreateDevice");
@@ -141,7 +102,7 @@ app.MapGet("api/devices/details", async (IDeviceService deviceService) =>
     }
 });
     
-app.MapGet("api/devices/{id:int}", async (int id, IDeviceService deviceService) =>
+app.MapGet("api/devices/{id}", async (string id, IDeviceService deviceService) =>
     {
         try
         {
@@ -169,7 +130,7 @@ app.MapGet("api/devices/{id:int}", async (int id, IDeviceService deviceService) 
     .WithName("GetDeviceById");
 
 
-app.MapDelete("api/devices/{id:int}", async (int id, IDeviceService deviceService) =>
+app.MapDelete("api/devices/{id}", async (string id, IDeviceService deviceService) =>
 {
     try
     {

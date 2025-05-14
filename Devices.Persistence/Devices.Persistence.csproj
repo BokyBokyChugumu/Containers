@@ -7,12 +7,12 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\Devices.Persistence\Devices.Persistence.csproj" />
-      <ProjectReference Include="..\Containers.Models\Containers.Models.csproj" />
+      <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.0-preview1.25120.4" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.0-preview1.25120.4" />
+      <ProjectReference Include="..\src\Containers.Models\Containers.Models.csproj" />
     </ItemGroup>
 
 </Project>

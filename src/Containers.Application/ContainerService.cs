@@ -32,8 +32,8 @@ public class ContainerService : IContainerService
                     {
                         var containerRow = new Container
                         {
-                            ID = reader.GetInt32(0),
-                            ContainerTypeID = reader.GetInt32(1),
+                            ID = reader.GetString(0),
+                            ContainerTypeID = reader.GetString(1),
                             isHazardious = reader.GetBoolean(2),
                             Name = reader.GetString(3)
                         };

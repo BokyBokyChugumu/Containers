@@ -1,334 +1,217 @@
-﻿using Containers.Models;
+﻿
+using Devices.Persistence.Repositories; 
+using System.Data;
+using Containers.Application;
+using Containers.Models;
 using Microsoft.Data.SqlClient;
 
-namespace Containers.Application;
+namespace Devices.Application;
 
 public class DeviceService : IDeviceService
 {
-    private readonly string _connectionString;
+    private readonly IDeviceRepository _deviceRepository;
 
-    public DeviceService(string connectionString)
+    public DeviceService(IDeviceRepository deviceRepository) 
     {
-        _connectionString = !string.IsNullOrEmpty(connectionString)
-            ? connectionString
-            : throw new ArgumentNullException(nameof(connectionString), "Connection string cannot be null or empty.");
+        _deviceRepository = deviceRepository;
+    }
+    
+    
+    private DeviceDetailsResponse? MapToDeviceDetailsResponse(Device? device, object? specificDetail, string? deviceType)
+    {
+        if (device == null || string.IsNullOrEmpty(deviceType))
+        {
+            return null;
+        }
+
+        var response = new DeviceDetailsResponse
+        {
+            Id = device.Id,
+            Name = device.Name,
+            IsEnabled = device.IsEnabled,
+            RowVersion = device.RowVersion,
+            DeviceType = deviceType
+        };
+
+        switch (deviceType.ToLowerInvariant())
+        {
+            case "personalcomputer" when specificDetail is PersonalComputer pc:
+                response.OperationSystem = pc.OperationSystem;
+                break;
+            case "embedded" when specificDetail is Embedded emb:
+                response.IpAddress = emb.IpAddress;
+                response.NetworkName = emb.NetworkName;
+                break;
+            case "smartwatch" when specificDetail is Smartwatch sw:
+                response.BatteryPercentage = sw.BatteryPercentage;
+                break;
+        }
+        return response;
     }
 
+     public async Task<DeviceDetailsResponse?> CreateDeviceAsync(CreateDeviceRequest request)
+    {
+        string newDeviceId = Guid.NewGuid().ToString();
+        var baseDevice = new Device
+        {
+            Id = newDeviceId,
+            Name = request.Name,
+            IsEnabled = request.IsEnabled
+        };
+
+        try
+        {
+            string normalizedDeviceType = request.DeviceType?.Trim().ToLowerInvariant() ?? string.Empty;
+            switch (normalizedDeviceType)
+            {
+                case "personalcomputer":
+                    var pc = new PersonalComputer { DeviceId = newDeviceId, OperationSystem = request.OperationSystem };
+                    await _deviceRepository.AddPersonalComputerAsync(baseDevice, pc);
+                    break;
+                case "embedded":
+                    var emb = new Embedded { DeviceId = newDeviceId, IpAddress = request.IpAddress, NetworkName = request.NetworkName };
+                    await _deviceRepository.AddEmbeddedAsync(baseDevice, emb);
+                    break;
+                case "smartwatch":
+                    var sw = new Smartwatch { DeviceId = newDeviceId, BatteryPercentage = request.BatteryPercentage };
+                    await _deviceRepository.AddSmartwatchAsync(baseDevice, sw);
+                    break;
+                default:
+                    throw new ArgumentException("Invalid device type provided.", nameof(request.DeviceType));
+            }
+            
+            var (createdBaseDevice, createdSpecificDetail, createdDeviceType) = 
+                await _deviceRepository.GetFullDeviceDataByIdAsync(newDeviceId);
+            
+            return MapToDeviceDetailsResponse(createdBaseDevice, createdSpecificDetail, createdDeviceType);
+        }
+        catch (SqlException ex) when (ex.Number == 50001)
+        {
+             Console.WriteLine($"Error creating device (ID possibly exists): {ex.Message}");
+             return null; 
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error creating device: {ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<bool> UpdateDeviceAsync(string id, UpdateDeviceRequest request)
+    {
+        var (existingBaseDevice, existingSpecificDetail, existingDeviceType) = 
+            await _deviceRepository.GetFullDeviceDataByIdAsync(id);
+
+        if (existingBaseDevice == null || existingDeviceType == null)
+        {
+            return false; 
+        }
+
+        var deviceToUpdate = new Device
+        {
+            Id = id,
+            Name = request.Name,
+            IsEnabled = request.IsEnabled,
+            RowVersion = request.RowVersion 
+        };
+
+        object? specificDetailsToUpdate = null;
+        switch (existingDeviceType.ToLowerInvariant())
+        {
+            case "personalcomputer":
+                specificDetailsToUpdate = new PersonalComputer { Id = ((PersonalComputer)existingSpecificDetail!).Id, DeviceId = id, OperationSystem = request.OperationSystem };
+                break;
+            case "embedded":
+                specificDetailsToUpdate = new Embedded { Id = ((Embedded)existingSpecificDetail!).Id, DeviceId = id, IpAddress = request.IpAddress, NetworkName = request.NetworkName };
+                break;
+            case "smartwatch":
+                specificDetailsToUpdate = new Smartwatch { Id = ((Smartwatch)existingSpecificDetail!).Id, DeviceId = id, BatteryPercentage = request.BatteryPercentage };
+                break;
+        }
+
+        try
+        {
+            return await _deviceRepository.UpdateDeviceAsync(deviceToUpdate, specificDetailsToUpdate, existingDeviceType);
+        }
+        catch (DBConcurrencyException)
+        {
+            throw;
+        }
+    }
     
-    private void AddParameterWithValue(SqlCommand command, string parameterName, object? value)
+    public async Task<DeviceDetailsResponse?> GetDeviceDetailsByIdAsync(string id)
     {
         
-        command.Parameters.AddWithValue(parameterName, value ?? DBNull.Value);
+        var (baseDevice, specificDetail, determinedDeviceType) = await _deviceRepository.GetFullDeviceDataByIdAsync(id);
+
+        if (baseDevice == null || determinedDeviceType == null)
+        {
+            return null; 
+        }
+
+        
+        var responseDto = new DeviceDetailsResponse
+        {
+            Id = baseDevice.Id,
+            Name = baseDevice.Name,
+            IsEnabled = baseDevice.IsEnabled,
+            RowVersion = baseDevice.RowVersion,
+            DeviceType = determinedDeviceType
+        };
+
+        switch (determinedDeviceType.ToLowerInvariant())
+        {
+            case "personalcomputer" when specificDetail is PersonalComputer pc:
+                responseDto.OperationSystem = pc.OperationSystem;
+                break;
+            case "embedded" when specificDetail is Embedded emb:
+                responseDto.IpAddress = emb.IpAddress;
+                responseDto.NetworkName = emb.NetworkName;
+                break;
+            case "smartwatch" when specificDetail is Smartwatch sw:
+                responseDto.BatteryPercentage = sw.BatteryPercentage;
+                break;
+        }
+        return responseDto;
     }
 
-    
     public async Task<IEnumerable<DeviceShortInfo>> GetAllDevicesShortInfoAsync()
     {
-        var devices = new List<DeviceShortInfo>();
-        const string queryString = "SELECT Id, Name, IsEnabled FROM Device ORDER BY Name;";
-
-        try
-        {
-            using var connection = new SqlConnection(_connectionString);
-            using var command = new SqlCommand(queryString, connection);
-
-            await connection.OpenAsync();
-            using var reader = await command.ExecuteReaderAsync();
-
-            while (await reader.ReadAsync())
-            {
-                devices.Add(new DeviceShortInfo
-                {
-                    Id = reader.GetInt32(reader.GetOrdinal("Id")), // Используем имена
-                    Name = reader.GetString(reader.GetOrdinal("Name")),
-                    IsEnabled = reader.GetBoolean(reader.GetOrdinal("IsEnabled"))
-                });
-            }
-        }
-        catch (SqlException ex)
-        {
-            Console.WriteLine($"SQL Error in GetAllDevicesShortInfoAsync: {ex.Message}");
-            throw;
-        }
-        return devices;
-    }
-
-    
-    public async Task<DeviceDetailsResponse?> GetDeviceDetailsByIdAsync(int id)
-    {
-        DeviceDetailsResponse? deviceDetails = null;
+        var devices = await _deviceRepository.GetAllDevicesAsync();
         
-        const string queryString = @"
-            SELECT
-                d.Id, d.Name, d.IsEnabled,
-                pc.OperationSystem,
-                e.IpAddress, e.NetworkName,
-                sw.BatteryPercentage,
-                CASE
-                    WHEN pc.Id IS NOT NULL THEN 'PersonalComputer'
-                    WHEN e.Id IS NOT NULL THEN 'Embedded'
-                    WHEN sw.Id IS NOT NULL THEN 'Smartwatch'
-                    ELSE 'Unknown'
-                END AS DeviceType
-            FROM Device d
-            LEFT JOIN PersonalComputer pc ON d.Id = pc.DeviceId
-            LEFT JOIN Embedded e ON d.Id = e.DeviceId
-            LEFT JOIN Smartwatch sw ON d.Id = sw.DeviceId
-            WHERE d.Id = @DeviceId;";
-
-        try
+        return devices.Select(d => new DeviceShortInfo
         {
-            using var connection = new SqlConnection(_connectionString);
-            using var command = new SqlCommand(queryString, connection);
-            AddParameterWithValue(command, "@DeviceId", id); // Используем helper
-
-            await connection.OpenAsync();
-            using var reader = await command.ExecuteReaderAsync();
-
-            if (await reader.ReadAsync())
-            {
-                deviceDetails = new DeviceDetailsResponse
-                {
-                    Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                    Name = reader.GetString(reader.GetOrdinal("Name")),
-                    IsEnabled = reader.GetBoolean(reader.GetOrdinal("IsEnabled")),
-                    DeviceType = reader.GetString(reader.GetOrdinal("DeviceType")),
-                    OperationSystem = reader.IsDBNull(reader.GetOrdinal("OperationSystem")) ? null : reader.GetString(reader.GetOrdinal("OperationSystem")),
-                    IpAddress = reader.IsDBNull(reader.GetOrdinal("IpAddress")) ? null : reader.GetString(reader.GetOrdinal("IpAddress")),
-                    NetworkName = reader.IsDBNull(reader.GetOrdinal("NetworkName")) ? null : reader.GetString(reader.GetOrdinal("NetworkName")),
-                    BatteryPercentage = reader.IsDBNull(reader.GetOrdinal("BatteryPercentage")) ? (int?)null : reader.GetInt32(reader.GetOrdinal("BatteryPercentage"))
-                };
-            }
-        }
-        catch (SqlException ex)
-        {
-            Console.WriteLine($"SQL Error in GetDeviceDetailsByIdAsync: {ex.Message}");
-            throw;
-        }
-        return deviceDetails;
-    }
-
-    
-    public async Task<Device?> CreateDeviceAsync(CreateDeviceRequest request)
-    {
-        
-        string normalizedDeviceType = request.DeviceType?.Trim().ToLowerInvariant() ?? "";
-        if (!new[] { "personalcomputer", "embedded", "smartwatch" }.Contains(normalizedDeviceType))
-        {
-            Console.WriteLine($"Error: Invalid DeviceType '{request.DeviceType}' provided.");
+            Id = d.Id,
+            Name = d.Name,
+            IsEnabled = d.IsEnabled
             
-            throw new ArgumentException($"Invalid DeviceType: {request.DeviceType}");
-            
-        }
-
-        Device? createdDevice = null;
-        int newDeviceId = -1;
-
-        using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync();
-        
-        using var transaction = connection.BeginTransaction();
-
-        try
-        {
-            
-            const string insertDeviceSql = "INSERT INTO Device (Name, IsEnabled) OUTPUT INSERTED.Id VALUES (@Name, @IsEnabled);";
-            using (var commandDevice = new SqlCommand(insertDeviceSql, connection, transaction))
-            {
-                AddParameterWithValue(commandDevice, "@Name", request.Name);
-                AddParameterWithValue(commandDevice, "@IsEnabled", request.IsEnabled);
-
-                newDeviceId = (int)(await commandDevice.ExecuteScalarAsync() ?? throw new Exception("Failed to retrieve new Device ID."));
-            }
-
-            
-            string insertSpecificSql = "";
-            using (var commandSpecific = new SqlCommand { Connection = connection, Transaction = transaction })
-            {
-                 AddParameterWithValue(commandSpecific, "@DeviceId", newDeviceId);
-
-                switch (normalizedDeviceType)
-                {
-                    case "personalcomputer":
-                        insertSpecificSql = "INSERT INTO PersonalComputer (DeviceId, OperationSystem) VALUES (@DeviceId, @OperationSystem);";
-                        AddParameterWithValue(commandSpecific, "@OperationSystem", request.OperationSystem);
-                        break;
-                    case "embedded":
-                        insertSpecificSql = "INSERT INTO Embedded (DeviceId, IpAddress, NetworkName) VALUES (@DeviceId, @IpAddress, @NetworkName);";
-                        AddParameterWithValue(commandSpecific, "@IpAddress", request.IpAddress);
-                        AddParameterWithValue(commandSpecific, "@NetworkName", request.NetworkName);
-                        break;
-                    case "smartwatch":
-                        insertSpecificSql = "INSERT INTO Smartwatch (DeviceId, BatteryPercentage) VALUES (@DeviceId, @BatteryPercentage);";
-                        AddParameterWithValue(commandSpecific, "@BatteryPercentage", request.BatteryPercentage);
-                        break;
-                }
-                commandSpecific.CommandText = insertSpecificSql;
-                int specificRowsAffected = await commandSpecific.ExecuteNonQueryAsync();
-
-                 if (specificRowsAffected <= 0) {
-                     throw new Exception($"Failed to insert details for {request.DeviceType}.");
-                 }
-            }
-
-            
-            await transaction.CommitAsync();
-            createdDevice = new Device { Id = newDeviceId, Name = request.Name, IsEnabled = request.IsEnabled };
-        }
-        catch (Exception ex)
-        {
-            
-            await transaction.RollbackAsync();
-            Console.WriteLine($"Error in CreateDeviceAsync transaction: {ex.Message}");
-            throw;
-        }
-
-        return createdDevice;
+        }).ToList();
     }
     
-     public async Task<IEnumerable<DeviceDetailsResponse>> GetAllDeviceDetailsAsync()
+    public async Task<IEnumerable<DeviceDetailsResponse>> GetAllDeviceDetailsAsync()
     {
-        var allDeviceDetails = new List<DeviceDetailsResponse>();
+        var devicesFromRepo = await _deviceRepository.GetAllDevicesAsync(); 
+        var detailedDevices = new List<DeviceDetailsResponse>();
+
+        foreach (var baseDevice in devicesFromRepo)
+        {
+            
+            var details = await GetDeviceDetailsByIdAsync(baseDevice.Id);
+            if (details != null)
+            {
+                detailedDevices.Add(details);
+            }
+        }
+        return detailedDevices;
         
-        const string queryString = @"
-            SELECT
-                d.Id, d.Name, d.IsEnabled,
-                pc.OperationSystem,
-                e.IpAddress, e.NetworkName,
-                sw.BatteryPercentage,
-                CASE
-                    WHEN pc.Id IS NOT NULL THEN 'PersonalComputer'
-                    WHEN e.Id IS NOT NULL THEN 'Embedded'
-                    WHEN sw.Id IS NOT NULL THEN 'Smartwatch'
-                    ELSE 'Unknown' -- Или просто 'Device'
-                END AS DeviceType
-            FROM Device d
-            LEFT JOIN PersonalComputer pc ON d.Id = pc.DeviceId
-            LEFT JOIN Embedded e ON d.Id = e.DeviceId
-            LEFT JOIN Smartwatch sw ON d.Id = sw.DeviceId
-            ORDER BY d.Id; -- Добавим сортировку для предсказуемого порядка
-            ";
-
-        try
-        {
-            using var connection = new SqlConnection(_connectionString);
-            using var command = new SqlCommand(queryString, connection);
-
-            await connection.OpenAsync();
-            using var reader = await command.ExecuteReaderAsync();
-
-            while (await reader.ReadAsync()) 
-            {
-                 var deviceDetails = new DeviceDetailsResponse
-                {
-                    Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                    Name = reader.GetString(reader.GetOrdinal("Name")),
-                    IsEnabled = reader.GetBoolean(reader.GetOrdinal("IsEnabled")),
-                    DeviceType = reader.GetString(reader.GetOrdinal("DeviceType")),
-                    OperationSystem = reader.IsDBNull(reader.GetOrdinal("OperationSystem")) ? null : reader.GetString(reader.GetOrdinal("OperationSystem")),
-                    IpAddress = reader.IsDBNull(reader.GetOrdinal("IpAddress")) ? null : reader.GetString(reader.GetOrdinal("IpAddress")),
-                    NetworkName = reader.IsDBNull(reader.GetOrdinal("NetworkName")) ? null : reader.GetString(reader.GetOrdinal("NetworkName")),
-                    BatteryPercentage = reader.IsDBNull(reader.GetOrdinal("BatteryPercentage")) ? (int?)null : reader.GetInt32(reader.GetOrdinal("BatteryPercentage"))
-                };
-                allDeviceDetails.Add(deviceDetails);
-            }
-        }
-        catch (SqlException ex)
-        {
-            Console.WriteLine($"SQL Error in GetAllDeviceDetailsAsync: {ex.Message}");
-            throw; 
-        }
-        return allDeviceDetails;
-    }
-    
-    
-    public async Task<bool> UpdateDeviceAsync(int id, UpdateDeviceRequest request)
-    {
-        using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync();
-        using var transaction = connection.BeginTransaction();
-
-        try
-        {
-            
-            var details = await GetDeviceDetailsByIdAsync(id); 
-            if (details == null) return false;
-
-            
-            const string updateDeviceSql = "UPDATE Device SET Name = @Name, IsEnabled = @IsEnabled WHERE Id = @Id;";
-            using (var commandDevice = new SqlCommand(updateDeviceSql, connection, transaction))
-            {
-                AddParameterWithValue(commandDevice, "@Name", request.Name);
-                AddParameterWithValue(commandDevice, "@IsEnabled", request.IsEnabled);
-                AddParameterWithValue(commandDevice, "@Id", id);
-                await commandDevice.ExecuteNonQueryAsync();
-            }
-
-            
-            string updateSpecificSql = "";
-            using (var commandSpecific = new SqlCommand { Connection = connection, Transaction = transaction })
-            {
-                AddParameterWithValue(commandSpecific, "@DeviceId", id);
-
-                switch (details.DeviceType.ToLowerInvariant())
-                {
-                     case "personalcomputer":
-                        updateSpecificSql = "UPDATE PersonalComputer SET OperationSystem = @OperationSystem WHERE DeviceId = @DeviceId;";
-                        AddParameterWithValue(commandSpecific, "@OperationSystem", request.OperationSystem);
-                        break;
-                    case "embedded":
-                        updateSpecificSql = "UPDATE Embedded SET IpAddress = @IpAddress, NetworkName = @NetworkName WHERE DeviceId = @DeviceId;";
-                        AddParameterWithValue(commandSpecific, "@IpAddress", request.IpAddress);
-                        AddParameterWithValue(commandSpecific, "@NetworkName", request.NetworkName);
-                        break;
-                    case "smartwatch":
-                        updateSpecificSql = "UPDATE Smartwatch SET BatteryPercentage = @BatteryPercentage WHERE DeviceId = @DeviceId;";
-                        AddParameterWithValue(commandSpecific, "@BatteryPercentage", request.BatteryPercentage);
-                        break;
-                     default:
-                         updateSpecificSql = "";
-                         break;
-                }
-
-                 if (!string.IsNullOrEmpty(updateSpecificSql))
-                 {
-                    commandSpecific.CommandText = updateSpecificSql;
-                    await commandSpecific.ExecuteNonQueryAsync();
-                 }
-            }
-
-            await transaction.CommitAsync();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            Console.WriteLine($"Error in UpdateDeviceAsync transaction: {ex.Message}");
-            throw; 
-        }
     }
 
-    
-    public async Task<bool> DeleteDeviceAsync(int id)
+    public async Task<bool> DeleteDeviceAsync(string id)
     {
         
-        const string deleteSql = "DELETE FROM Device WHERE Id = @Id;";
-        int rowsAffected = 0;
-
-        try
-        {
-            using var connection = new SqlConnection(_connectionString);
-            using var command = new SqlCommand(deleteSql, connection);
-            AddParameterWithValue(command, "@Id", id);
-
-            await connection.OpenAsync();
-            rowsAffected = await command.ExecuteNonQueryAsync();
+        if (!await _deviceRepository.DeviceExistsAsync(id)) {
+            return false;
         }
-        catch (SqlException ex)
-        {
-             Console.WriteLine($"SQL Error in DeleteDeviceAsync: {ex.Message}");
-             throw;
-        }
-        return rowsAffected > 0;
+        return await _deviceRepository.DeleteDeviceAsync(id);
     }
 }

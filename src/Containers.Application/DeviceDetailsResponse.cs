@@ -2,9 +2,10 @@
 
 public class DeviceDetailsResponse
 {
-    public int Id { get; set; }
+    public string Id { get; set; }
     public required string Name { get; set; }
     public bool IsEnabled { get; set; }
+    public byte[]? RowVersion { get; set; }
     public required string DeviceType { get; set; }
     
     public string? OperationSystem { get; set; }

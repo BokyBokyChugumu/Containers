@@ -2,8 +2,8 @@
 
 public class Container
 {
-    public int ID { get; set; }
-    public int ContainerTypeID { get; set; }
+    public string ID { get; set; }
+    public string ContainerTypeID { get; set; }
     public bool isHazardious { get; set; }
     public string Name { get; set; }
 }
