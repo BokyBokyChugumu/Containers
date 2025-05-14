@@ -1,14 +1,39 @@
-CREATE TABLE ContainerType (
-                               ID INT PRIMARY KEY IDENTITY(1,1),
-                               Name NVARCHAR(100) NOT NULL
+CREATE TABLE Device (
+    Id NVARCHAR(50) NOT NULL PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    IsEnabled BIT NOT NULL DEFAULT 1,
+    RowVersion ROWVERSION NOT NULL
 );
 GO
 
--- Create Containers table
-CREATE TABLE Containers (
-                            ID INT PRIMARY KEY IDENTITY(1,1),
-                            ContainerTypeId INT NOT NULL,
-                            IsHazardious BIT NOT NULL,
-                            Name NVARCHAR(100) NOT NULL,
-                            FOREIGN KEY (ContainerTypeId) REFERENCES ContainerType(ID)
+CREATE TABLE PersonalComputer (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY, 
+    OperationSystem NVARCHAR(100), 
+    DeviceId NVARCHAR(50) NOT NULL UNIQUE,
+    CONSTRAINT FK_PersonalComputer_Device FOREIGN KEY (DeviceId) REFERENCES Device(Id) ON DELETE CASCADE
 );
+GO
+
+
+CREATE TABLE Embedded (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    IpAddress VARCHAR(45),
+    NetworkName NVARCHAR(100), 
+    DeviceId NVARCHAR(50) NOT NULL UNIQUE, 
+    CONSTRAINT FK_Embedded_Device FOREIGN KEY (DeviceId) REFERENCES Device(Id) ON DELETE CASCADE
+);
+GO
+
+
+
+CREATE TABLE Smartwatch (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY, 
+    BatteryPercentage INT,
+    DeviceId NVARCHAR(50) NOT NULL UNIQUE,
+    CONSTRAINT FK_Smartwatch_Device FOREIGN KEY (DeviceId) REFERENCES Device(Id) ON DELETE CASCADE
+);
+
+
+
+
+
